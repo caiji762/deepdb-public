@@ -17,6 +17,7 @@ from schemas.flights.schema import gen_flights_1B_schema
 from schemas.imdb.schema import gen_job_light_imdb_schema
 from schemas.ssb.schema import gen_500gb_ssb_schema
 from schemas.tpc_ds.schema import gen_1t_tpc_ds_schema
+from schemas.imdb.schema import gen_miniob_schema
 
 np.random.seed(1)
 
@@ -77,7 +78,8 @@ if __name__ == '__main__':
     parser.add_argument('--ensemble_location', nargs='+',
                         default=['../ssb-benchmark/spn_ensembles/ensemble_single_ssb-500gb_10000000.pkl',
                                  '../ssb-benchmark/spn_ensembles/ensemble_relationships_ssb-500gb_10000000.pkl'])
-    parser.add_argument('--query_file_location', default='./benchmarks/ssb/sql/cardinality_queries.sql')
+    # parser.add_argument('--query_file_location', default='./benchmarks/ssb/sql/cardinality_queries.sql')
+    parser.add_argument('--query', default='SELECT COUNT(*) FROM movie_companies mc,title t,movie_info_idx mi_idx WHERE t.id=mc.movie_id AND t.id=mi_idx.movie_id AND mi_idx.info_type_id=112 AND mc.company_type_id=2;')
     parser.add_argument('--ground_truth_file_location',
                         default='./benchmarks/ssb/sql/cardinality_true_cardinalities_100GB.csv')
     parser.add_argument('--database_name', default=None)
@@ -115,12 +117,15 @@ if __name__ == '__main__':
     table_csv_path = args.csv_path + '/{}.csv'
     if args.dataset == 'imdb-light':
         schema = gen_job_light_imdb_schema(table_csv_path)
+        # schema = gen_job_light_imdb_schema(table_csv_path)
     elif args.dataset == 'ssb-500gb':
         schema = gen_500gb_ssb_schema(table_csv_path)
     elif args.dataset == 'flights1B':
         schema = gen_flights_1B_schema(table_csv_path)
     elif args.dataset == 'tpc-ds-1t':
         schema = gen_1t_tpc_ds_schema(table_csv_path)
+    elif args.dataset == 'miniob-test':
+        schema = gen_miniob_schema(table_csv_path)
     else:
         raise ValueError('Dataset unknown')
 
@@ -198,14 +203,21 @@ if __name__ == '__main__':
     if args.evaluate_cardinalities:
         from evaluation.cardinality_evaluation import evaluate_cardinalities
 
-        logging.info(
-            f"maqp(evaluate_cardinalities: database_name={args.database_name}, target_path={args.target_path})")
-        evaluate_cardinalities(args.ensemble_location, args.database_name, args.query_file_location, args.target_path,
+        # logging.info(
+        #     f"maqp(evaluate_cardinalities: database_name={args.database_name}, target_path={args.target_path})")
+        # evaluate_cardinalities(args.ensemble_location, args.database_name, args.query_file_location, args.target_path,
+        #                        schema, args.rdc_spn_selection, args.pairwise_rdc_path,
+        #                        use_generated_code=args.use_generated_code,
+        #                        merge_indicator_exp=args.merge_indicator_exp,
+        #                        exploit_overlapping=args.exploit_overlapping, max_variants=args.max_variants,
+        #                        true_cardinalities_path=args.ground_truth_file_location, min_sample_ratio=0)
+
+        evaluate_cardinalities(args.ensemble_location, args.query,
                                schema, args.rdc_spn_selection, args.pairwise_rdc_path,
                                use_generated_code=args.use_generated_code,
                                merge_indicator_exp=args.merge_indicator_exp,
                                exploit_overlapping=args.exploit_overlapping, max_variants=args.max_variants,
-                               true_cardinalities_path=args.ground_truth_file_location, min_sample_ratio=0)
+                               min_sample_ratio=0)
 
     # Compute ground truth for AQP queries
     if args.aqp_ground_truth:
@@ -239,3 +251,29 @@ if __name__ == '__main__':
                                       exploit_overlapping=args.exploit_overlapping, min_sample_ratio=0,
                                       true_result_upsampling_factor=args.confidence_upsampling_factor,
                                       sample_size=args.confidence_sample_size)
+
+
+'''
+python3 maqp.py --generate_hdf --dataset imdb-light --csv_seperator , --csv_path ../imdb-benchmark --hdf_path ../imdb-benchmark/gen_single_light --max_rows_per_hdf_file 100000000
+python3 maqp.py --generate_hdf --dataset imdb-light --csv_seperator , --csv_path ../imdb-benchmark --hdf_path ../imdb-benchmark/gen_single_light --max_rows_per_hdf_file 100000000
+
+Generate sampled hdf files from csvs.
+python3 maqp.py --generate_sampled_hdfs --dataset imdb-light --hdf_path ../imdb-benchmark/gen_single_light --max_rows_per_hdf_file 100000000 --hdf_sample_size 10000
+
+Learn ensemble with the optimized rdc strategy (requires postgres with imdb dataset)
+python3 maqp.py --generate_ensemble --dataset imdb-light  --samples_per_spn 10000000 10000000 1000000 1000000 1000000 --ensemble_strategy rdc_based --hdf_path ../imdb-benchmark/gen_single_light --max_rows_per_hdf_file 100000000 --samples_rdc_ensemble_tests 10000 --ensemble_path ../imdb-benchmark/spn_ensembles --database_name imdb --post_sampling_factor 10 10 5 1 1 --ensemble_budget_factor 5 --ensemble_max_no_joins 3 --pairwise_rdc_path ../imdb-benchmark/spn_ensembles/pairwise_rdc.pkl
+python3 maqp.py --generate_ensemble --dataset imdb-light  --samples_per_spn 10000 10000 10000000 10000000 10000000 --ensemble_strategy rdc_based --hdf_path ../imdb-benchmark/gen_single_light --max_rows_per_hdf_file 100000000 --samples_rdc_ensemble_tests 10000 --ensemble_path ../imdb-benchmark/ensembles --database_name imdb --post_sampling_factor 10 10 5 1 1 --ensemble_budget_factor 5 --ensemble_max_no_joins 3 --pairwise_rdc_path ../imdb-benchmark/ensembles/pairwise_rdc_sampleSize10000_spnsampleSize104_spnNumsample107.pkl
+
+python3 maqp.py --generate_ensemble --dataset imdb-light  --samples_per_spn 1000000 1000000 1000000 1000000 1000000 --ensemble_strategy relationship --hdf_path ../imdb-benchmark/gen_single_light --ensemble_path ../imdb-benchmark/spn_ensembles --max_rows_per_hdf_file 100000000 --post_sampling_factor 10 10 5 1 1
+
+Evaluate performance for queries
+python3 maqp.py --evaluate_cardinalities --rdc_spn_selection --max_variants 1 --pairwise_rdc_path ../imdb-benchmark/spn_ensembles/pairwise_rdc.pkl --dataset imdb-light --target_path ./baselines/cardinality_estimation/results/deepDB/job-light.csv --ensemble_location ../imdb-benchmark/spn_ensembles/ensemble_join_3_budget_5_10000000.pkl --query_file_location ./benchmarks/job-light/sql/job_light_queries.sql --ground_truth_file_location ./benchmarks/job-light/sql/job_light_true_cardinalities.csv
+
+python3 maqp.py --evaluate_cardinalities --rdc_spn_selection --max_variants 1 --pairwise_rdc_path ../imdb-benchmark/spn_ensembles/pairwise_rdc.pkl --dataset imdb-light --target_path ./baselines/cardinality_estimation/results/deepDB/scale.csv --ensemble_location ../imdb-benchmark/spn_ensembles/ensemble_join_3_budget_5_10000000.pkl --query_file_location ./benchmarks/job-light/sql/scale_queries.sql --ground_truth_file_location ./benchmarks/job-light/sql/scale_true_cardinalities.csv
+
+python3 maqp.py --evaluate_cardinalities --rdc_spn_selection --max_variants 1 --pairwise_rdc_path ../imdb-benchmark/spn_ensembles/pairwise_rdc.pkl --dataset imdb-light --target_path ./baselines/cardinality_estimation/results/deepDB/synethic.csv --ensemble_location ../imdb-benchmark/spn_ensembles/ensemble_join_3_budget_5_10000000.pkl --query_file_location ./benchmarks/job-light/sql/synthetic_queries.sql --ground_truth_file_location ./benchmarks/job-light/sql/synthetic_true_cardinalities.csv
+
+** Updates
+Conditional incremental learning (i.e., initial learning of all films before 2013, newer films learn incremental)
+python3 maqp.py  --generate_ensemble --dataset imdb-light --samples_per_spn 10000000 10000000 1000000 1000000 1000000 --ensemble_strategy rdc_based --hdf_path ../imdb-benchmark/gen_single_light --max_rows_per_hdf_file 100000000 --samples_rdc_ensemble_tests 10000 --ensemble_path ../imdb-benchmark/spn_ensembles --database_name test --post_sampling_factor 10 10 5 1 1 --ensemble_budget_factor 0 --ensemble_max_no_joins 3 --pairwise_rdc_path ../imdb-benchmark/spn_ensembles/pairwise_rdc.pkl --incremental_condition "title.production_year<2013"
+'''
